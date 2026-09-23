@@ -76,7 +76,7 @@ class DshGateContract(unittest.TestCase):
         self.assertIn('"ok": false', out)
         self.assertIn("unproven-claim", out)
 
-    def test_verdct_json_reports_structure(self):
+    def test_verdict_json_reports_structure(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = make_log(tmp, [
                 user("task: fix it"),

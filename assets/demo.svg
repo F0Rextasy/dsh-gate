@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1308" height="462" viewBox="0 0 1308 462" font-family="'Cascadia Mono','Cascadia Code',Consolas,'DejaVu Sans Mono',monospace">
+<defs><clipPath id="c"><rect x="0" y="40" width="1308" height="422" rx="0"/></clipPath></defs>
+<rect width="1308" height="462" rx="10" fill="#0d1117"/>
+<path d="M0 10 A10 10 0 0 1 10 0 H1298 A10 10 0 0 1 1308 10 V40 H0 Z" fill="#161b22"/>
+<line x1="0" y1="40" x2="1308" y2="40" stroke="#30363d"/>
+<circle cx="20" cy="20" r="6.5" fill="#ff5f56"/>
+<circle cx="42" cy="20" r="6.5" fill="#ffbd2e"/>
+<circle cx="64" cy="20" r="6.5" fill="#27c93f"/>
+<text x="654" y="25" font-size="12.5" fill="#8b949e" text-anchor="middle">dsh-gate  --  red turn verdict</text>
+<text x="22" y="68" font-size="15" fill="#c9d1d9" xml:space="preserve">{</text>
+<text x="22" y="90" font-size="15" fill="#ff7b72" xml:space="preserve">  &quot;ok&quot;: false,</text>
+<text x="22" y="112" font-size="15" fill="#c9d1d9" xml:space="preserve">  &quot;counts&quot;: {</text>
+<text x="22" y="134" font-size="15" fill="#ff7b72" xml:space="preserve">    &quot;fail&quot;: 1,</text>
+<text x="22" y="156" font-size="15" fill="#c9d1d9" xml:space="preserve">    &quot;warn&quot;: 0</text>
+<text x="22" y="178" font-size="15" fill="#c9d1d9" xml:space="preserve">  },</text>
+<text x="22" y="200" font-size="15" fill="#c9d1d9" xml:space="preserve">  &quot;findings&quot;: [</text>
+<text x="22" y="222" font-size="15" fill="#c9d1d9" xml:space="preserve">    {</text>
+<text x="22" y="244" font-size="15" fill="#c9d1d9" xml:space="preserve">      &quot;adapter&quot;: &quot;dsh-gate&quot;,</text>
+<text x="22" y="266" font-size="15" fill="#c9d1d9" xml:space="preserve">      &quot;rule&quot;: &quot;failing-tool&quot;,</text>
+<text x="22" y="288" font-size="15" fill="#ff7b72" xml:space="preserve">      &quot;severity&quot;: &quot;fail&quot;,</text>
+<text x="22" y="310" font-size="15" fill="#c9d1d9" xml:space="preserve">      &quot;file&quot;: &quot;&quot;,</text>
+<text x="22" y="332" font-size="15" fill="#c9d1d9" xml:space="preserve">      &quot;line&quot;: 0,</text>
+<text x="22" y="354" font-size="15" fill="#ff7b72" xml:space="preserve">      &quot;message&quot;: &quot;failing tool call bash pytest -q exited 1: 1 failed, 3 passed&quot;</text>
+<text x="22" y="376" font-size="15" fill="#c9d1d9" xml:space="preserve">    }</text>
+<text x="22" y="398" font-size="15" fill="#c9d1d9" xml:space="preserve">  ]</text>
+<text x="22" y="420" font-size="15" fill="#c9d1d9" xml:space="preserve">}</text>
+<text x="22" y="442" font-size="15" fill="#ff7b72" xml:space="preserve">[dsh-gate] Verification failed: 1 failing, 0 warnings -- failing tool call bash pytest -q exited 1: 1 failed, 3 passed -- repair and re-run</text>
+</svg>
