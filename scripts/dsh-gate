@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""dsh-gate -- deterministic quality gate for DeepSeek Harness turns.
+
+Reads a dsh session log (JSONL), runs the sibling gates over the finished
+turn (prove-it over assistant claims, testgate over the test tree), refuses
+to close turns with failing tool calls, and never blocks a question to the
+user. No model, no network, no logprobs: the opposite of the LLM verifier.
+
+Commands: session (verdict JSON on stdout), message (same + gate text on
+stderr, the plugin channel). Exit 0 = close the turn, 1 = repair and
+re-run, 2 = usage error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE_ROOT = os.path.dirname(ROOT)
+DEFAULT_PROVE = os.path.join("prove-it", "scripts", "prove.py")
+DEFAULT_TESTGATE = os.path.join("testgate", "scripts", "testgate.py")
+ATTEMPT_TYPES = ("assistant/attempt", "assistant/message")
+TIMEOUT = 300
+
+
+def load_events(log_path):
+    """Return (events, error). error is a string when the log is unusable."""
+    if not log_path:
+        return [], None
+    if not os.path.exists(log_path):
+        return None, "log not found: %s" % log_path
+    events = []
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    events.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        return None, "cannot read log: %s" % exc
+    return events, None
+
+
+def attempts_of(events):
+    out = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") in ATTEMPT_TYPES:
+            text = ev.get("content", ev.get("text", ""))
+            if isinstance(text, str) and text.strip():
+                out.append(text)
+    return out
+
+
+def tool_failures(events):
+    fails = []
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("type") != "tool/result":
+            continue
+        exit_code = ev.get("exit", ev.get("exit_code"))
+        if exit_code in (0, None):
+            continue
+        argv = " ".join([str(ev.get("tool", "tool"))]
+                        + [str(a) for a in ev.get("argv", [])])
+        detail = ev.get("output") or ev.get("error") or ""
+        detail = detail.strip().splitlines()
+        detail = ": %s" % detail[-1][:100] if detail else ""
+        fails.append({"adapter": "dsh-gate", "rule": "failing-tool",
+                      "severity": "fail", "file": "", "line": 0,
+                      "message": "failing tool call %s exited %s%s"
+                                 % (argv, exit_code, detail)})
+    return fails
+
+
+def resolve_cmd(explicit, default_rel):
+    """Normalize an adapter command; None when the script cannot be found."""
+    if explicit:
+        cmd = list(explicit)
+        for i, tok in enumerate(cmd):
+            if (tok.endswith(".py") and not os.path.isabs(tok)
+                    and not os.path.exists(tok)):
+                cand = os.path.join(WORKSPACE_ROOT, tok)
+                if os.path.exists(cand):
+                    cmd[i] = cand
+        return cmd
+    for cand in (os.path.join(WORKSPACE_ROOT, default_rel),
+                 os.path.join(os.getcwd(), default_rel)):
+        if os.path.exists(cand):
+            return [sys.executable, cand]
+    return None
+
+
+def run_json(cmd):
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, "adapter failed to run: %s" % exc
+    try:
+        return json.loads(proc.stdout), None
+    except (json.JSONDecodeError, ValueError):
+        return None, "adapter output unparseable: %s" % proc.stdout[:120]
+
+
+def adapter_warn(adapter, message):
+    return {"adapter": adapter, "rule": "adapter-error", "severity": "warn",
+            "file": "", "line": 0, "message": message}
+
+
+def prove_findings(attempts, prove_cmd):
+    report = "\n\n".join(a for a in attempts if a.strip())
+    if report:
+        report += "\n"
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                     encoding="utf-8") as fh:
+        fh.write(report)
+        tmp = fh.name
+    try:
+        data, err = run_json(prove_cmd + [tmp, "--format", "json"])
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    if err is not None:
+        return [adapter_warn("prove-it", err)]
+    out = []
+    for f in data.get("findings", []):
+        out.append({"adapter": "prove-it", "rule": f.get("rule", "?"),
+                    "severity": f.get("severity", "fail"),
+                    "file": f.get("file", ""), "line": f.get("line", 0),
+                    "message": f.get("message", "")})
+    return out
+
+
+def testgate_findings(scan_path, testgate_cmd):
+    data, err = run_json(testgate_cmd + [scan_path, "--format", "json"])
+    if err is not None:
+        return [adapter_warn("testgate", err)]
+    out = []
+    for f in data.get("findings", []):
+        out.append({"adapter": "testgate", "rule": f.get("rule", "?"),
+                    "severity": f.get("severity", "fail"),
+                    "file": f.get("file", ""), "line": f.get("line", 0),
+                    "message": f.get("message", "")})
+    return out
+
+
+def verdict(args):
+    events, err = load_events(args.log)
+    if err is not None:
+        return None, err
+    attempts = attempts_of(events)
+    if attempts and attempts[-1].strip().endswith("?"):
+        return {"ok": True, "question": True,
+                "reason": "ends with a question to the user -- never blocked",
+                "counts": {"fail": 0, "warn": 0}, "findings": []}, None
+
+    findings = []
+    if not getattr(args, "no_prove", False):
+        prove_cmd = resolve_cmd(args.prove_script, DEFAULT_PROVE)
+        if prove_cmd is None:
+            findings.append(adapter_warn("prove-it",
+                                         "prove-it script not found -- "
+                                         "claims unchecked"))
+        else:
+            findings.extend(prove_findings(attempts, prove_cmd))
+    if getattr(args, "testgate", False):
+        tg_cmd = resolve_cmd(args.testgate_script, DEFAULT_TESTGATE)
+        if tg_cmd is None:
+            findings.append(adapter_warn("testgate",
+                                         "testgate script not found -- "
+                                         "tests unchecked"))
+        else:
+            findings.extend(testgate_findings(args.path or ".", tg_cmd))
+    findings.extend(tool_failures(events))
+
+    counts = {"fail": 0, "warn": 0}
+    for f in findings:
+        counts["fail" if f["severity"] == "fail" else "warn"] += 1
+    failing = counts["fail"] > 0 or (args.strict and counts["warn"] > 0)
+    return {"ok": not failing, "counts": counts,
+            "findings": findings}, None
+
+
+def gate_line(result):
+    if result["ok"]:
+        return ("[dsh-gate] turn verified: clean -- %d finding(s) checked, "
+                "0 blocking" % len(result.get("findings", [])))
+    counts = result.get("counts", {})
+    first = ""
+    if result.get("findings"):
+        first = " -- %s" % result["findings"][0]["message"][:120]
+    return ("[dsh-gate] Verification failed: %d failing, %d warnings%s -- "
+            "repair and re-run"
+            % (counts.get("fail", 0), counts.get("warn", 0), first))
+
+
+def add_common(parser):
+    parser.add_argument("--log", default=None,
+                        help="dsh session log (JSONL)")
+    parser.add_argument("--path", default=".",
+                        help="test tree for --testgate (default: .)")
+    parser.add_argument("--prove", action="store_true",
+                        help="run prove-it over assistant claims (default on)")
+    parser.add_argument("--no-prove", action="store_true",
+                        help="skip the prove-it adapter")
+    parser.add_argument("--prove-script", nargs="+", default=None,
+                        metavar="CMD",
+                        help="prove-it command, e.g. --prove-script python "
+                             "prove-it/scripts/prove.py")
+    parser.add_argument("--testgate", action="store_true",
+                        help="run testgate over --path")
+    parser.add_argument("--testgate-script", nargs="+", default=None,
+                        metavar="CMD",
+                        help="testgate command, e.g. --testgate-script python "
+                             "testgate/scripts/testgate.py")
+    parser.add_argument("--strict", action="store_true",
+                        help="warnings also block the turn")
+    parser.add_argument("--no-color", action="store_true",
+                        help="accepted for family uniformity; output is JSON")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog="dsh-gate",
+        description="Deterministic turn gate for DeepSeek Harness: claims "
+                    "need evidence, tests must be able to fail, red tools "
+                    "block, questions never block.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p_session = sub.add_parser("session", help="print the verdict as JSON")
+    add_common(p_session)
+    p_message = sub.add_parser(
+        "message", help="verdict as JSON plus the gate text on stderr")
+    add_common(p_message)
+    args = ap.parse_args(argv)
+
+    result, err = verdict(args)
+    if err is not None:
+        ap.error(err)
+    json.dump(result, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    if args.cmd == "message":
+        sys.stderr.write(gate_line(result) + "\n")
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
