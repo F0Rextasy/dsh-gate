@@ -4,7 +4,8 @@
 
 [![tests](https://img.shields.io/github/actions/workflow/status/F0Rextasy/dsh-gate/test.yml?branch=master&label=tests&style=flat-square&color=3fb950)](https://github.com/F0Rextasy/dsh-gate/actions/workflows/test.yml)
 [![python](https://img.shields.io/badge/python-3.8%2B-3776AB?logo=python&logoColor=white&style=flat-square)](https://www.python.org/)
-[![no LLM](https://img.shields.io/badge/verdicts-no%20LLM-E34C26?style=flat-square)](#what-it-will-never-do)
+[![verdicts](https://img.shields.io/badge/verdicts-deterministic-3fb950?style=flat-square)](#what-it-will-never-do)
+[![skills](https://skills.sh/b/F0Rextasy/dsh-gate?style=flat-square)](https://skills.sh/F0Rextasy/dsh-gate)
 [![license](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 
 ![dsh-gate verdict on a red turn](assets/demo.svg)
@@ -16,6 +17,10 @@ An agent turn ends with "done - all tests pass." Behind it: `pytest` exited 1, t
 ## Quick start
 
 ```bash
+# install the skill into any agent (Claude Code, Codex, Cursor, OpenCode, ...):
+npx skills add F0Rextasy/dsh-gate
+
+# or run it directly:
 git clone https://github.com/F0Rextasy/dsh-gate
 python dsh-gate/scripts/dsh-gate session --log session.jsonl   # verdict JSON
 python dsh-gate/scripts/dsh-gate message --log session.jsonl   # + gate text on stderr
